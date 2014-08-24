@@ -39,6 +39,9 @@ class Rider40(object):
     BLOCK_SIZE = 4096
     BLOCK_COUNT = 0x1ff
 
+    # TODO: Make this dynamic
+    TIMESTEP = 4
+
     has_altimeter = True
 
     def __init__(self, device_access):
@@ -151,8 +154,24 @@ class LogEntry(object):
     offset_start_logpoints = None
     offset_end_logpoints = None
 
+def haversine(lon1, lat1, lon2, lat2):
+    from math import radians, cos, sin, asin, sqrt
+    """
+    Calculate the great circle distance between two points
+    on the earth (specified in decimal degrees)
+    """
+    # convert decimal degrees to radians
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
 
+    # haversine formula
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
 
+    # 6367 km is the radius of the Earth
+    km = 6367 * c
+    return km
 
 class Track(object):
 
@@ -230,7 +249,45 @@ class Track(object):
 
     def merged_segments(self, remove_empty_track_segs=True):
 
+        # My Rider40 appears to have some SW issues which cause it to
+        # mislog GPS readings. This manifests as a FAST point followed
+        # a few points later by a slow point. The fast point appears to be
+        # because it records a late GPS reading against the previous time
+        # thus making things seem 2x faster than they are. Sometime later
+        # a point is completely missing after which things settle back down
+        # The simple solution is to find these FAST points and shuffle the
+        # timestamps around
+        # We have to be careful not to include points because of missing points
+        # While idle!
         for tseg, lseg in zip(self.trackpoints, self.logpoints):
+            p = None
+            i = None
+            for tp in tseg:
+                if i is None: i = tp.timestamp
+
+                # Adjust
+                if p and tp.timestamp == p.timestamp:
+                    tp.timestamp = tp.timestamp + Rider40.TIMESTEP
+
+                # Find lap point
+                lp = None
+                for l in lseg:
+                    if lp is None or abs(l.timestamp - tp.timestamp)\
+                                   < abs(lp.timestamp - tp.timestamp):
+                        lp = l
+
+                # Check speed
+                if p and lp:
+                    dtm  = (tp.timestamp - p.timestamp)
+                    dist = haversine(p.longitude, p.latitude,\
+                                     tp.longitude, tp.latitude)
+                    spd  = dist / (dtm / 3600.0)
+
+                    # Anomaly
+                    if spd > (lp.speed * 1.75):
+                        tp.timestamp = tp.timestamp + timestep
+
+                p = tp
 
             if remove_empty_track_segs and not tseg:
                 continue
