@@ -285,7 +285,7 @@ class Track(object):
 
                     # Anomaly
                     if spd > (lp.speed * 1.75):
-                        tp.timestamp = tp.timestamp + timestep
+                        tp.timestamp = tp.timestamp + Rider40.TIMESTEP
 
                 p = tp
 
